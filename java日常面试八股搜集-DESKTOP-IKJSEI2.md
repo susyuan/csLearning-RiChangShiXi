@@ -4,6 +4,18 @@
 
 # 岗位要求
 
+## 百度
+
+![image-20230903213541791](https://duoduo-img.oss-cn-shenzhen.aliyuncs.com/202309032135895.png)
+
+![image-20230903213554226](https://duoduo-img.oss-cn-shenzhen.aliyuncs.com/202309032135325.png)
+
+![image-20230903213614653](https://duoduo-img.oss-cn-shenzhen.aliyuncs.com/202309032136747.png)
+
+![image-20230903213630005](https://duoduo-img.oss-cn-shenzhen.aliyuncs.com/202309032136088.png)
+
+![image-20230903213646561](https://duoduo-img.oss-cn-shenzhen.aliyuncs.com/202309032136649.png)![image-20230903213702517](https://duoduo-img.oss-cn-shenzhen.aliyuncs.com/202309032137605.png)
+
 目标：
 
 kafka dubbo es docker 网络编程
@@ -689,7 +701,6 @@ sql题，学习成绩第二的所有学生
   > 4.Java常用包及其设计模式
   > 5.RocketMQ的机制
 
-  
   
 
 
@@ -1583,8 +1594,8 @@ cpu100%怎么检查哪个代码出现了问题
 \12. 你们的平台怎么保证健壮的正常运行，做了哪些措施？
 \13. 项目是以一个jar的形式导入的嘛？
 八股：
-jvm的Gc分代算法是怎么样的？
-如何确保对象可以被回收呢？
+**jvm的Gc分代算法是怎么样的？**
+**如何确保对象可以被回收呢？**
 老年代的对象引用了年轻代的对象会怎样？（这个是真懵逼了）
 如果让你做sql优化，你想到的常用措施？
 反问：
@@ -4229,14 +4240,14 @@ redis的过期时间TTL，是谁来负责更新的？就比如过期时间是100
 12. Hash如何扩容，如何解决哈希冲突，底层数据结构？什么情况下采用ziplist/hashtable？
 13. 项目中Redis的String指定了哪种序列化方式，还是以二进制方式存入的？有启动RedisClient查看存储的数据结构吗（字符串长什么样）？
 
-1. RBAC是自己独立实现的吗
-2. 授权部分是怎么做的，如何判断用户拥有某权限
-3. 用Spring AOP了吗
-4. SpringBoot依赖注入的注解，依赖注入有哪些方式
-5. 静态属性如何注入？@Value注解在哪？和其它几种区别是什么
+14. RBAC是自己独立实现的吗
+15. 授权部分是怎么做的，如何判断用户拥有某权限
+16. 用Spring AOP了吗
+17. SpringBoot依赖注入的注解，依赖注入有哪些方式
+18. 静态属性如何注入？@Value注解在哪？和其它几种区别是什么
 
-1. @Resource 和 @Autowired 使用有什么区别
-2. Bean的名字不是默认，能用@Autowired吗，要怎么办
+19. @Resource 和 @Autowired 使用有什么区别
+20. Bean的名字不是默认，能用@Autowired吗，要怎么办
 
 
 
