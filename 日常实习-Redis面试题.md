@@ -382,7 +382,7 @@ String  Hash
 
 
 
-# 基础
+# 一、Redis基础
 
 ## --什么是redis
 
@@ -472,7 +472,7 @@ stream 秒杀异步
 
 
 
-# 线程模型
+# 四、线程模型
 
 ## --redis是单线程吗
 
@@ -501,7 +501,7 @@ redis会启动后台线程
 
 ## Redis如何找出大量以某一个前缀开头的key。(有什么命令，不会)
 
-# 数据类型
+# 二、数据类型
 
 ## Redis常见数据类型及其使用场景（5+4）
 
@@ -543,6 +543,12 @@ list set zset string hash
 ![img](https://duoduo-img.oss-cn-shenzhen.aliyuncs.com/202309051701384.png)
 
 ### SDS
+
+### C语言字符串的缺陷
+
+
+
+### SDS结构设计
 
 
 
@@ -637,7 +643,7 @@ token，前端访问会带有token
 
 
 
-# 事务
+# 六、Redis事务
 
 ## --概念
 
@@ -657,7 +663,7 @@ discard清空事务队列
 
 watch监控  如果命令被修改  就执行失败
 
-# 持久化
+# 三、持久化
 
 ## 简述redis持久化机制。有什么优缺点。
 
@@ -780,7 +786,7 @@ aof数据安全性较好，每次写操作都生成
 
 
 
-# 缓存
+# 七、Redis缓存
 
 缓存过多需要删除/更新
 
@@ -884,9 +890,110 @@ redis如何实现定期删除
 
 Cache Aside Pattern 中服务端需要同时维系 db 和 cache，并且是以 db 的结果为准。
 
+### Cache Aside Pattern(旁路缓存模式)
+
+**Cache Aside Pattern 是我们平时使用比较多的一个缓存读写模式，比较适合读请求比较多的场景。**
+
+Cache Aside Pattern 中服务端需要同时维系 db 和 cache，并且是以 db 的结果为准。
+
+
+
+#### **缓存读写步骤**
+
+**写**：
+
+- 先更新 db
+- 然后直接删除 cache 。
+
+**读** :
+
+- 从 cache 中读取数据，读取到就直接返回
+- cache 中读取不到的话，就从 db 中读取数据返回
+- 再把数据放到 cache 中。
+
+
+
+比如说面试官很可能会追问：“**在写数据的过程中，可以先删除 cache ，后更新 db 么？**”
+
+**答案：** 那肯定是不行的！因为这样可能会造成 **数据库（db）和缓存（Cache）数据不一致**的问题。
+
+举例：请求 1 先写数据 A，请求 2 随后读数据 A 的话，就很有可能产生数据不一致性的问题。
+
+这个过程可以简单描述为：
+
+> 请求 1 先把 cache 中的 A 数据删除 -> 请求 2 从 db 中读取数据->请求 1 再把 db 中的 A 数据更新
+
+当你这样回答之后，面试官可能会紧接着就追问：“**在写数据的过程中，先更新 db，后删除 cache 就没有问题了么？**”
+
+**答案：** 理论上来说还是可能会出现数据不一致性的问题，不过概率非常小，因为缓存的写入速度是比数据库的写入速度快很多。
+
+举例：请求 1 先读数据 A，请求 2 随后写数据 A，并且数据 A 在请求 1 请求之前不在缓存中的话，也有可能产生数据不一致性的问题。
+
+这个过程可以简单描述为：
+
+> 请求 1 从 db 读数据 A-> 请求 2 更新 db 中的数据 A（此时缓存中无数据 A ，故不用执行删除缓存操作 ） -> 请求 1 将数据 A 写入 cache
+
+**Cache Aside Pattern 的缺陷**
+
+**缺陷 1：首次请求数据一定不在 cache 的问题**
+
+解决办法：可以将热点数据可以提前放入 cache 中。
+
+**缺陷 2：写操作比较频繁的话导致 cache 中的数据会被频繁被删除，这样会影响缓存命中率 。**
+
+**解决办法：**
+
+1数据库和缓存数据强一致场景：更新 db 的时候同样更新 cache，不过我们需要加一个锁/分布式锁来保证更新 cache 的时候不存在线程安全问题。
+
+2可以短暂地允许数据库和缓存数据不一致的场景：更新 db 的时候同样更新 cache，但是给缓存加一个比较短的过期时间，这样的话就可以保证即使数据不一致的话影响也比较小。
+
+### Read/Write Through Pattern(读写穿透)
+
+Read/Write Through Pattern 中服务端把 cache 视为主要数据存储，从中读取数据并将数据写入其中。cache 服务负责将此数据读取和写入 db，从而减轻了应用程序的职责。
+
+这种缓存读写策略小伙伴们应该也发现了在平时在开发过程中非常少见。抛去性能方面的影响，大概率是因为我们经常使用的分布式缓存 Redis 并没有提供 cache 将数据写入 db 的功能。
+
+**写（Write Through）：**
+
+- 先查 cache，cache 中不存在，直接更新 db。
+- cache 中存在，则先更新 cache，然后 cache 服务自己更新 db（**同步更新 cache 和 db**）。
+
+简单画了一张图帮助大家理解写的步骤。
+
+
+
+**读(Read Through)：**
+
+- 从 cache 中读取数据，读取到就直接返回 。
+- 读取不到的话，先从 db 加载，写入到 cache 后返回响应。
+
+简单画了一张图帮助大家理解读的步骤。
+
+Read-Through Pattern 实际只是在 Cache-Aside Pattern 之上进行了封装。在 Cache-Aside Pattern 下，发生读请求的时候，如果 cache 中不存在对应的数据，是由客户端自己负责把数据写入 cache，而 Read Through Pattern 则是 cache 服务自己来写入缓存的，这对客户端是透明的。
+
+和 Cache Aside Pattern 一样， Read-Through Pattern 也有首次请求数据一定不再 cache 的问题，对于热点数据可以提前放入缓存中
+
+
+
+### Write Behind Pattern(异步缓存写入)
+
+Write Behind Pattern 和 Read/Write Through Pattern 很相似，两者都是由 cache 服务来负责 cache 和 db 的读写。
+
+但是，两个又有很大的不同：**Read/Write Through 是同步更新 cache 和 db，而 Write Behind 则是只更新缓存，不直接更新 db，而是改为异步批量的方式来更新 db。**
+
+很明显，这种方式对数据一致性带来了更大的挑战，比如 cache 数据可能还没异步更新 db 的话，cache 服务可能就就挂掉了。
+
+这种策略在我们平时开发过程中也非常非常少见，但是不代表它的应用场景少，比如消息队列中消息的异步写入磁盘、MySQL 的 Innodb Buffer Pool 机制都用到了这种策略。
+
+Write Behind Pattern 下 db 的写性能非常高，非常适合一些数据经常变化又对数据一致性要求没那么高的场景，比如浏览量、点赞量。
+
 
 
 ## mysql和redis双写一致性（四种方案
+
+> 相关面试题：
+>
+> ​	1.数据库和缓存如何保证一致性？
 
 修改数据时，数据库数据会变化，要保证缓存和数据库数据同步
 
@@ -962,7 +1069,7 @@ Cache Aside Pattern 中服务端需要同时维系 db 和 cache，并且是以 d
 
 三种
 
-## 什么是缓存穿透 如何解决
+## 缓存穿透 及解决方案
 
 缓存穿透是指**缓存和数据库中都没有的数据**，而用户不断发起请求。
 
@@ -974,7 +1081,7 @@ Cache Aside Pattern 中服务端需要同时维系 db 和 cache，并且是以 d
 
 
 
-## 什么是缓存击穿 如何解决
+## 缓存击穿 及解决方案
 
 缓存击穿是指**缓存中没有但数据库中有的数据**（一般是缓存时间到期），这时由于并发用户特别多，同时读缓存没读到数据，又同时去数据库去取数据，引起数据库压力瞬间增大，造成过大压力。
 
@@ -983,7 +1090,7 @@ Cache Aside Pattern 中服务端需要同时维系 db 和 cache，并且是以 d
 - 互斥锁方案，保证同一时间只有一个业务线程更新缓存，未能获取互斥锁的请求，要么等待锁释放后重新读取缓存，要么就返回空值或者默认值。
 - 不给热点数据设置过期时间，由后台异步更新缓存，或者在热点数据准备要过期前，提前通知后台线程更新缓存以及重新设置过期时间；
 
-## 什么是缓存雪崩 如何解决
+## 缓存雪崩 及解决方案
 
 缓存雪崩是指缓存中**数据大批量到过期时间or redis宕机，而查询数据量巨大，引起数据库压力过大甚至down机**。
 
@@ -1073,15 +1180,644 @@ MQ本质是业务的排队。好处是避免高并发压垮系统的关键组件
 
 3.一致性问题：A处理成功直接返回  接受消息的BCD  有一个写库失败 就不一致
 
-# 主从 哨兵 集群
+# 八、主从 哨兵 集群
 
-## 主从复制
+## Redis 主从复制（主从节点之间如何同步数据）
 
-### --概念
+### 前言
+
+单机 Redis 存在单点风险问题，也就是说，如果唯一的一个 Redis 节点宕机的话，就会导致大量的请求直接被打到数据库，严重的情况下，数据库很可能会直接被干宕机了。
+
+这个时候，保障 Redis 服务的高可用就成为了我们不得不面对的问题。
+
+如何保证 Redis 服务高可用？ 最简单的一种办法就是基于 主从复制 搭建一个 Redis 集群，master（主节点）主要负责处理写请求，slave（从节点）主要负责处理读请求。
 
 
 
-## --介绍下集群
+如果 master 宕机的话，从 slave 中选出一台作为 master 即可实现故障转移（Failover）。
+
+
+
+是不是有点类似于 MySQL 的读写分离？这其实就是一种典型的多副本/备份的思想，经常被用在高可用架构上。
+
+### 什么是主从复制
+
+简单来说，**主从复制** 就是将一台 Redis 主节点的数据复制到其他的 Redis 从节点中，尽最大可能保证 Redis 主节点和从节点的数据是一致的。主从复制是 Redis 高可用的基石，我们后面介绍到的 Redis Sentinel 以及 Redis Cluster 都依赖于主从复制。
+
+主从复制这种方案不仅保障了 Redis 服务的高可用，还实现了读写分离，提高了系统的并发量，尤其是读并发量。
+
+主从复制这种方案基于 [Redis replication](https://redis.io/docs/manual/replication/)（默认使用异步复制），开发者可以通过 replicaof （Redis 5.0 之前是 slaveof 命令）命令来配置各个 Redis 节点的主从关系。
+
+
+
+配置完成之后，主从节点之间的数据同步会自动进行，不需要人为插手。
+
+
+
+至于具体要配置多少 slave 节点，主要取决于项目的读吞吐量，因为 slave 节点分担的是读请求，写请求由 master 节点负责。
+
+
+
+
+
+### 主从复制下从节点会主动删除过期数据吗？
+
+类似的问题：
+
+●主从复制下会读取到过期的数据吗？
+●主从复制下如何避免读取到过期的数据?
+
+这是一个常见的问题，面试中也经常会问到。
+
+我们知道，Redis 中常用的过期数据的删除策略就两个（重要！自己造缓存轮子的时候需要格外考虑的东西）：
+
+●惰性删除 ：只会在取出 key 的时候才对数据进行过期检查。这样对 CPU 最友好，但是可能会造成太多过期 key 没有被删除。
+●定期删除 ： 每隔一段时间抽取一批 key 执行删除过期 key 操作。并且，Redis 底层会通过限制删除操作执行的时长和频率来减少删除操作对 CPU 时间的影响。
+
+定期删除对内存更加友好，惰性删除对 CPU 更加友好。两者各有千秋，所以 Redis 采用的是 定期删除+惰性/懒汉式删除 。
+
+那客户端读取从节点会读取到过期数据么？ 答案是：有可能，但要看具体的情况。
+
+●Redis 3.2 版本之前，客户端读从库并不会判断数据是否过期，有可能返回过期数据。Redis 3.2 版本及之后，客户端读从库会先判断数据是否过期，如果过期的话，就会删除对应的数据并返回空值。
+●采用 EXPIRE 或者PEXPIRE设置过期时间的话，表示的是从执行这个命令开始往后 TTL 时间过期。如果从节点同步执行命令因为网络等原因延迟的话，客户端就可能会读取到过期的数据（如下图所示，客户端在 T3-T4 之间读取到的就是过期数据）。这种情况可以考虑使用 EXPIREAT 和 PEXPIREAT，这两个命令语义和效果和 EXPIRE 或者PEXPIRE类似，但不是指定 TTL（生存时间）的秒数/毫秒数，而是使用绝对的 [Unix 时间戳](http://en.wikipedia.org/wiki/Unix_time)（自 1970 年 1 月 1 日以来的秒数）。由于设置的是时间点，主从节点的时钟需要保持一致。
+
+### 主从节点之间如何同步数据？
+
+> 类似的问题：
+>
+> ●主从复制的原理是什么？
+> ●master 节点的数据是如何同步给 slave 节点的?
+> ●复制积压缓冲区的有什么用?
+
+
+
+这个问题其实还挺复杂的，Redis 主从复制经历了多次改进，每一次的改进都解决了上一个版本的一些痛点。想要彻底搞懂的话，我们需要耐心地看看 Redis 主从复制的演进历程，这里主要分为下面 3 个阶段：
+
+
+
+●Redis 2.8 之前的 SYNC 方案
+
+●Redis 2.8 PSYNC 方案
+
+●Redis 4.0 PSYNC2.0 方案
+
+
+
+为了让大家更好理解，我这里已经是经我所能使用大白话讲解了，并且，还配有图解。
+
+
+
+需要注意：每一个版本的方案基本都是持续优化改进得到的。
+
+
+
+#### Redis 2.8 之前的 SYNC 方案 
+
+Redis 在 2.8 版本之前都是基于 [SYNC](https://redis.io/commands/sync/) 命令执行全量同步，整个步骤简化后是这样的：
+
+> 1slave 向 master 发送 SYNC 命令请求启动复制流程；
+>
+> 2master 收到 SYNC 命令之后执行 [BGSAVE](https://redis.io/commands/bgsave/) 命令（子线程执行，不会阻塞主线程）生成 RDB 文件（dump.rdb）；
+>
+> 3master 将生成的 RDB 文件发送给 slave；
+>
+> 4slave 收到 RDB 文件之后就开始加载解析 RDB 同步更新本地数据；
+>
+> 5更新完成之后，slave 的状态相当于是 master 执行 BGSAVE 命令时的状态。master 会将 BGSAVE 命令之后接受的写命令缓存起来，因为这部分写命令 slave 还未同步；
+>
+> 6master 将自己缓存的这些写命令发送给 slave，slave 执行这些写命令同步 master 的最新状态；
+>
+> 7slave 到这个时候已经完成全量复制，后续会通过和 master 维护的长连接来进行命令传播，同步最新的写命令
+
+
+
+master 为每一个 slave **单独** 开辟一块 **replication buffer（复制缓存区）**来记录 RDB 文件生成后 master 收到的所有写命令。
+
+
+
+replication buffer 可以通过下面这些参数来控制，超过指定的阈值后，master 就会强制断开对应 slave 的连接。
+
+
+
+
+
+执行 BGSAVE 命令之后，Redis 主线程会专门 fork 一个子进程，子进程共享主线程的内存数据。子进程会读取主线程中的内存数据写入 RDB 文件中，不会阻塞主线程。
+
+
+
+> 这里说 Redis 主线程而不是主进程的主要是因为 Redis 启动之后主要是通过单线程的方式完成主要的工作。如果你想将其描述为 Redis 主进程，也没毛病。
+
+
+
+虽然 BGSAVE 子进程写入 RDB 的工作不会阻塞主线程，但会对机器的 CPU 资源和内存资源产生影响，严重的情况下甚至会直接把 Redis 服务干宕机。
+
+
+
+●写入 RDB 的过程中，为了避免影响写操作，主线程修改的内存数据会被复制一份副本，BGSAVE 子进程把这个副本数据写入 RDB 文件。如果修改内存数据的请求比较多的话，生成内存数据副本产生的内存消耗是非常大的。这个过程称为 Copy On Write（写时复制，COW） ，操作系统层面提供的机制。
+
+●大量的写时复制会产生大量的分页错误（也叫缺页中断、页缺失），消耗大量的 CPU 资源。
+
+
+
+也就是说，通过 BGSAVE 操作属于重量级操作，会对机器的 CPU 资源和内存资源产生影响。在生产环境中，我们应该尽量避免在 master 实例上频繁执行 BGSAVE 命令。
+
+
+
+除了上面这个问题之外，Redis 在 2.8 版本之前主从复制还存在下面这些迫切需要解决的问题：
+
+
+
+●slave 加载 RDB 的过程中不能对外提供读服务。
+
+●slave 和 master 断开连接之后，slave 重新连上 master 需要重新进行全量同步。
+
+
+
+#### Redis 2.8 PSYNC 方案 
+
+Redis 2.8 版本 SYNC 命令被 [PSYNC](https://redis.io/commands/psync/) 取代，PSYNC 格式如下（相比较于 SYNC 命令，多了两个参数）：
+
+~~~bash
+PSYNC replicationid offset
+~~~
+
+
+
+PSYNC 解决了 slave 和 master 断开连接之后需要重新进行全量同步的问题。不过，部分情况（比如 slave 突然宕机或者被重启）重连之后依然需要进行全量同步。
+
+
+
+具体是怎么解决的呢？原理其实也很简单，slave 会记录 master 的运行 id （也就是 runid）和自己的复制进度/偏移量（slave_repl_offset）。
+
+
+
+每个 Redis 节点启动时都有一个 40 字节随机字符串作为运行 id，你可以通过 info server 命令查看 runid 的值。
+
+master 也会记录自己写入缓冲区的偏移量（master_repl_offset），如果 runid 匹配的话，通过 slave_repl_offset 和 master_repl_offset 就可以确认 slave 缺少的数据是否在缓冲区中以及缺少的具体是哪一部分的数据。
+
+这里集合 Redis 的源码简单介绍一下整个过程，源码地址：https://github.com/redis/redis/blob/2.8/src/replication.c。
+
+masterTryPartialResynchronization() (replication.c中的一个方法)的部分重要源码：
+
+#### Redis 4.0 PSYNC2.0 方案
+
+PSYNC 方案中，我们通过 runid（master 的 id）+ offset（复制偏移量）来实现增量同步。不过，由于主从切换之后新选出来的 master 的 runid 和 offset 都会发生变化，依然需要进行全量同步。
+
+Redis 4.0 PSYNC2.0 方案优化了 PSYNC 方案的增量同步方案，即使发生了主从切换，依然有可能进行增量同步而不是必须要全量同步。
+
+举个例子：master 有 2 个 slave(slave1 和 slave2)，master 宕机后，slave1 成为了新的 master。PSYNC 方案中，slave2 只能和新的 master 进行全量同步（master 的 runid 已经改变了）。PSYNC2.0 方案中，slave2 是有可能是可以和新的 master 进行增量同步的。
+
+为了达到这一效果，PSYNC2.0 舍弃了 runid 的概念了，取而代之的是replid 和 replid2：
+
+●对于 master 来说，replid 就是自己的复制 id。没有发生主从切换之前，replid2为空。发生主从切换之后，新的 master 的 replid2是旧 master （前一个自己同步的 master） 的 replid，在主从角色切换的时候会用到。
+●对于 slave 来说，replid 保存的是自己当前正在同步的 master 的 replid。replid2保存的是旧 master 的 replid，在主从角色切换的时候会用到。
+
+还有两个和偏移量相关的字段：
+
+●master_repl_offset : 当前的复制偏移量。
+●second_replid_offset ：没有发生主从切换之前，second_replid_offset的值为 -1。发生主从切换之后，新的 master 的 second_replid_offset是旧 master 的复制偏移量。
+
+### 为什么主从全量复制使用RDB而不是AOF
+
+>  题其实本质是在对比 RDB 和 AOF 这两种持久化方式。
+
+●**文件大小角度：**RDB 文件存储的内容是经过压缩的二进制数据，文件很小。AOF 文件存储的是每一次写命令，类似于 MySQL 的 binlog 日志，通常会必 RDB 文件大很多。因此，传输 RDB 文件更节省带宽，速度也更快。
+●**恢复速度：**使用 RDB 文件恢复数据，直接解析还原数据即可，不需要一条一条地执行命令，速度非常快。而 AOF 则需要依次执行每个写命令，速度非常慢。也就是说，与 AOF 相比，恢复大数据集的时候，RDB 速度更快。
+●**刷盘策略：**AOF 需要选择合适的刷盘策略，如果刷盘策略选择不当的话，会影响 Redis 的正常运行。并且，根据所使用的刷盘策略，AOF 的速度可能会慢于 RDB。
+
+### 主从复制方案有什么痛点
+
+主从复制方案下，master 发生宕机的话可以手动将某一台 slave 升级为 master，Redis 服务可用性提高。slave 可以分担读请求，读吞吐量大幅提高。
+
+**缺点：**
+
+但其缺陷也很明显，一旦 master 宕机，我们需要从 slave 中手动选择一个新的 master，同时需要修改应用方的主节点地址，还需要命令所有从节点去复制新的主节点，整个过程需要人工干预。人工干预大大增加了问题的处理时间以及出错的可能性。
+
+这个时候你肯定在想：如果能够自动化地完成故障切换就好了！我们后面介绍的 Redis Sentinel（哨兵）就可以帮助我们来解决这个痛点。
+
+另外，主从复制方案在高并发场景下能力有限。如果缓存的数据量太大或者并发量要求太高，主从复制就没办法满足我们的要求了。
+
+主从复制和 Redis Sentinel 这两种方案都不支持横向扩展来缓解写压力以及解决缓存数据量过大的问题。我们后面介绍的 Redis Cluster（官方切片集群解决方案）就可以帮助我们来解决这个痛点。
+
+## Redis Sentinel 哨兵（如何实现自动化故障转移）
+
+普通的主从复制方案下，一旦 master 宕机，我们需要从 slave 中手动选择一个新的 master，同时需要修改应用方的主节点地址，还需要命令所有从节点去复制新的主节点，整个过程需要人工干预。人工干预大大增加了问题的处理时间以及出错的可能性。
+
+我们可以借助 Redis 官方的 Sentinel（哨兵）方案来帮助我们解决这个痛点，实现自动化地故障切换。
+
+建议带着下面这些重要的问题（面试常问）阅读：
+
+1什么是 Sentinel？ 有什么用？
+2Sentinel 如何检测节点是否下线？主观下线与客观下线的区别?
+3Sentinel 是如何实现故障转移的？
+4为什么建议部署多个 sentinel 节点（哨兵集群）？
+5Sentinel 如何选择出新的 master（选举机制）?
+6如何从 Sentinel 集群中选择出 Leader ？
+7Sentinel 可以防止脑裂吗？
+
+### 什么是Sentinel?
+
+Sentinel（哨兵） 只是 Redis 的一种运行模式 ，不提供读写服务，默认运行在 26379 端口上，依赖于 Redis 工作。Redis Sentinel 的稳定版本是在 Redis 2.8 之后发布的。
+
+Redis 在 Sentinel 这种特殊的运行模式下，使用专门的命令表，也就是说普通模式运行下的 Redis 命令将无法使用。
+
+通过下面的命令就可以让 Redis 以 Sentinel 的方式运行:
+
+~~~bash
+redis-sentinel /path/to/sentinel.conf
+或者
+redis-server /path/to/sentinel.conf --sentinel
+~~~
+
+Redis 源码中的sentinel.conf是用来配置 Sentinel 的，一个常见的最小配置如下所示：
+
+~~~
+// 指定要监视的 master
+// 127.0.0.1 6379 为 master 地址
+// 2 表示当有 2 个 sentinel 认为 master 失效时，master 才算真正失效
+sentinel monitor mymaster 127.0.0.1 6379 2
+// master 节点宕机多长时间才会被 sentinel 认为是失效
+sentinel down-after-milliseconds mymaster 60000
+sentinel failover-timeout mymaster 180000
+sentinel parallel-syncs mymaster 1
+
+sentinel monitor resque 192.168.1.3 6380 4
+sentinel down-after-milliseconds resque 10000
+sentinel failover-timeout resque 180000
+// 在发生主备切换时最多可以有 5 个 slave 同时对新的 master 进行同步
+sentinel parallel-syncs resque 5
+~~~
+
+Redis Sentinel 实现 Redis 集群高可用，只是在主从复制实现集群的基础下，多了一个 Sentinel 角色来帮助我们监控 Redis 节点的运行状态并自动实现故障转移。
+
+
+
+当 master 节点出现故障的时候， Sentinel 会帮助我们实现故障转移，自动根据一定的规则选出一个 slave 升级为 master，确保整个 Redis 系统的可用性。整个过程完全自动，不需要人工介入。
+
+
+
+
+
+### Sentinel 有什么作用
+
+根据 [Redis Sentinel 官方文档](https://redis.io/topics/sentinel)的介绍，sentinel 节点主要可以提供 4 个功能：
+
+●监控：监控所有 redis 节点（包括 sentinel 节点自身）的状态是否正常。
+●故障转移：如果一个 master 出现故障，Sentinel 会帮助我们实现故障转移，自动将某一台 slave 升级为 master，确保整个 Redis 系统的可用性。
+●通知 ：通知 slave 新的 master 连接信息，让它们执行 replicaof 成为新的 master 的 slave。
+●配置提供 ：客户端连接 sentinel 请求 master 的地址，如果发生故障转移，sentinel 会通知新的 master 链接信息给客户端。
+
+Redis Sentinel 本身设计的就是一个分布式系统，建议多个 sentinel 节点协作运行。这样做的好处是：
+
+●多个 sentinel 节点通过投票的方式来确定 sentinel 节点是否真的不可用，避免误判（比如网络问题可能会导致误判）。
+●Sentinel 自身就是高可用。
+
+如果想要实现高可用，建议将哨兵 Sentinel 配置成单数且大于等于 3 台。
+
+一个最简易的 Redis Sentinel 集群如下所示（官方文档中的一个例子），其中：
+
+●M1 表示 master，R2、R3 表示 slave；
+●S1、S2、S3 都是 sentinel；
+●quorum 表示判定 master 失效最少需要的仲裁节点数。这里的值为 2 ，也就是说当有 2 个 sentinel 认为 master 失效时，master 才算真正失效。
+
+如果 M1 出现问题，只要 S1、S2、S3 其中的两个投票赞同的话，就会开始故障转移工作，从 R2 或者 R3 中重新选出一个作为 master。
+
+### Sentinel 如何检测节点是否下线
+
+相关的问题：
+
+●主观下线与客观下线的区别?
+●Sentinel 是如何实现故障转移的？
+●为什么建议部署多个 sentinel 节点（哨兵集群）？
+
+Redis Sentinel 中有两个下线（Down）的概念：
+
+●主观下线(SDOWN) ：sentinel 节点认为某个 Redis 节点已经下线了（主观下线），但还不是很确定，需要其他 sentinel 节点的投票。
+●客观下线(ODOWN) ：法定数量（通常为过半）的 sentinel 节点认定某个 Redis 节点已经下线（客观下线），那它就算是真的下线了。
+
+也就是说，主观下线 当前的 sentinel 自己认为节点宕机，客观下线是 sentinel 整体达成一致认为节点宕机。
+
+每个 sentinel 节点以每秒钟一次的频率向整个集群中的 master、slave 以及其他 sentinel 节点发送一个 PING 命令。
+
+如果对应的节点超过规定的时间（down-after-millseconds）没有进行有效回复的话，就会被其认定为是 主观下线(SDOWN) 。注意！这里的有效回复不一定是 PONG，可以是-LOADING 或者 -MASTERDOWN 。
+
+
+
+如果被认定为主观下线的是 slave 的话， sentinel 不会做什么事情，因为 slave 下线对 Redis 集群的影响不大，Redis 集群对外正常提供服务。但如果是 master 被认定为主观下线就不一样了，sentinel 整体还要对其进行进一步核实，确保 master 是真的下线了。
+
+
+
+所有 sentinel 节点要以每秒一次的频率确认 master 的确下线了，当法定数量（通常为过半）的 sentinel 节点认定 master 已经下线， master 才被判定为 客观下线(ODOWN) 。这样做的目的是为了防止误判，毕竟故障转移的开销还是比较大的，这也是为什么 Redis 官方推荐部署多个 sentinel 节点（哨兵集群）。
+
+
+
+随后， sentinel 中会有一个 Leader 的角色来负责故障转移，也就是自动地从 slave 中选出一个新的 master 并执行完相关的一些工作(比如通知 slave 新的 master 连接信息，让它们执行 replicaof 成为新的 master 的 slave)。
+
+如果没有足够数量的 sentinel 节点认定 master 已经下线的话，当 master 能对 sentinel 的 PING 命令进行有效回复之后，master 也就不再被认定为主观下线，回归正常。
+
+### Sentinel 如何选择出新的master？
+
+slave 必须是在线状态才能参加新的 master 的选举，筛选出所有在线的 slave 之后，通过下面 3 个维度进行最后的筛选（优先级依次降低）：
+
+
+
+1slave 优先级 ：可以通过修改 slave-priority（redis.conf中配置，Redis5.0 后该配置属性名称被修改为 replica-priority） 配置的值来手动设置 slave 的优先级。slave-priority默认值为 100，其值越小得分越高，越有机会成为 master。比如说假设有三个优先级分别为 10,100,25 的 slave ，哨兵将选择优先级为 10 的。不过，0 是一个特殊的优先级值 ，如果一个 slave 的 slave-priority值为 0，代表其没有参加 master 选举的资格。如果没有优先级最高的，再判断复制进度。
+
+2复制进度 ：Sentinel 总是希望选择出数据最完整（与旧 master 数据最接近）也就是复制进度最快的 slave 被提升为新的 master，复制进度越快得分也就越高。
+
+3runid(运行 id) ：通常经过前面两轮筛选已经成功选出来了新的 master，万一真有多个 slave 的优先级和复制进度一样的话，那就 runid 小的成为新的 master，每个 redis 节点启动时都有一个 40 字节随机字符串作为运行 id。
+
+
+
+  
+
+### 如何从Sentinel集群中选择出 Leader？
+
+我们前面说了，当 sentinel 集群确认有 master 客观下线了，就会开始故障转移流程，故障转移流程的第一步就是在 sentinel 集群选择一个 leader，让 leader 来负责完成故障转移。
+
+如何选择出 Leader 角色呢？
+
+这就需要用到分布式领域的 共识算法 了。简单来说，共识算法就是让分布式系统中的节点就一个问题达成共识。在 sentinel 选举 leader 这个场景下，这些 sentinel 要达成的共识就是谁才是 leader 。
+
+大部分共识算法都是基于 Paxos 算法改进而来，在 sentinel 选举 leader 这个场景下使用的是 [Raft 算法](https://javaguide.cn/distributed-system/theorem&algorithm&protocol/raft-algorithm.html)。这是一个比 Paxos 算法更易理解和实现的共识算法—Raft 算法。更具体点来说，Raft 是 Multi-Paxos 的一个变种，其简化了 Multi-Paxos 的思想，变得更容易被理解以及工程实现。
+
+对于学有余力并且想要深入了解 Raft 算法实践以及 sentinel 选举 leader 的详细过程的同学，推荐阅读下面这两篇文章：
+
+●[Raft 算法详解](https://javaguide.cn/distributed-system/protocol/raft-algorithm.html)
+●[Raft 协议实战之 Redis Sentinel 的选举 Leader 源码解析](https://cloud.tencent.com/developer/article/1021467)
+
+### Sentinel 可以防止脑裂吗？
+
+还是上面的例子，如果 M1 和 R2、R3 之间的网络被隔离，也就是发生了脑裂，M1 和 R2 、 R3 隔离在了两个不同的网络分区中。这意味着，R2 或者 R3 其中一个会被选为 master，这里假设为 R2。
+
+但是！这样会出现问题了！！
+
+如果客户端 C1 是和 M1 在一个网络分区的话，从网络被隔离到网络分区恢复这段时间，C1 写入 M1 的数据都会丢失，并且，C1 读取的可能也是过时的数据。这是因为当网络分区恢复之后，M1 将会成为 slave 节点。
+
+
+
+想要解决这个问题的话也不难，对 Redis 主从复制进行配置即可。
+
+
+
+下面对这两个配置进行解释：
+
+●min-replicas-to-write 1：用于配置写 master 至少写入的 slave 数量，设置为 0 表示关闭该功能。3 个节点的情况下，可以配置为 1 ，表示 master 必须写入至少 1 个 slave ，否则就停止接受新的写入命令请求。
+●min-replicas-max-lag 10 ：用于配置 master 多长时间（秒）无法得到从节点的响应，就认为这个节点失联。我们这里配置的是 10 秒，也就是说 master 10 秒都得不到一个从节点的响应，就会认为这个从节点失联，停止接受新的写入命令请求。
+
+不过，这样配置会降低 Redis 服务的整体可用性，如果 2 个 slave 都挂掉，master 将会停止接受新的写入命令请求。
+
+## Redis Cluster集群（缓存的数据量太大怎么办）
+
+建议带着下面这些重要的问题（面试常问）阅读：
+
+●为什么需要 Redis Cluster？解决了什么问题？有什么优势？
+●Redis Cluster 是如何分片的？
+●为什么 Redis Cluster 的哈希槽是 16384 个?
+●如何确定给定 key 的应该分布到哪个哈希槽中？
+●Redis Cluster 支持重新分配哈希槽吗？
+●Redis Cluster 扩容缩容期间可以提供服务吗？
+●Redis Cluster 中的节点是怎么进行通信的？
+
+### 为什么需要Redis Cluster
+
+高并发场景下，使用 Redis 主要会遇到的两个问题：
+
+1. **缓存的数据量太大** ：实际缓存的数据量可以达到几十 G，甚至是成百上千 G；
+2. **并发量要求太大** ：虽然 Redis 号称单机可以支持 10w 并发，但实际项目中，不可靠因素太多，就比如一些复杂的写/读操作就可能会让这个并发量大打折扣。而且，就算真的可以实际支持 10w 并发，达到瓶颈了，可能也没办法满足系统的实际需求。
+
+主从复制和 Redis Sentinel 这两种方案本质都是通过增加主库（master）的副本（slave）数量的方式来提高 Redis 服务的整体可用性和读吞吐量，都不支持横向扩展来缓解写压力以及解决缓存数据量过大的问题。
+
+
+
+对于这两种方案来说，如果写压力太大或者缓存数据量太大的话，我们可以考虑提高服务器硬件的配置。不过，提高硬件配置成本太高，能力有限，无法动态扩容缩容，局限性太大。从本质上来说，靠堆硬件配置的方式并没有实质性地解决问题，依然无法满足高并发场景下分布式缓存的要求。
+
+
+
+通常情况下，更建议使用 **Redis 切片集群** 这种方案，更能满足高并发场景下分布式缓存的要求。
+
+
+
+简单来说，**Redis 切片集群** 就是部署多台 Redis 主节点（master），这些节点之间平等，并没有主从之说，同时对外提供读/写服务。缓存的数据库相对均匀地分布在这些 Redis 实例上，客户端的请求通过路由规则转发到目标 master 上。
+
+
+
+为了保障集群整体的高可用，我们需要保证集群中每一个 master 的高可用，可以通过主从复制给每个 master 配置一个或者多个从节点（slave）。
+
+
+
+
+
+
+
+Redis 切片集群对于横向扩展非常友好，只需要增加 Redis 节点到集群中即可。
+
+
+
+在 Redis 3.0 之前，我们通常使用的是 [Twemproxy](https://github.com/twitter/twemproxy)、[Codis](https://github.com/CodisLabs/codis) 这类开源分片集群方案。Twemproxy、Codis 就相当于是上面的 Proxy 层，负责维护路由规则，实现负载均衡。
+
+
+
+不过，Twemproxy、Codis 虽然未被淘汰，但官方已经没有继续维护了。
+
+到了 Redis 3.0 的时候，Redis 官方推出了分片集群解决方案 [Redis Cluster](https://redis.io/topics/cluster-tutorial) 。经过多个版本的持续完善，Redis Cluster 成为 Redis 切片集群的首选方案，满足绝大部分高并发业务场景需求。
+
+Redis Cluster 通过 分片（Sharding） 来进行数据管理，提供 主从复制（Master-Slave Replication）、故障转移（Failover） 等开箱即用的功能，可以非常方便地帮助我们解决 Redis 大数据量缓存以及 Redis 服务高可用的问题。
+
+Redis Cluster 这种方案可以很方便地进行 横向拓展（Scale Out），内置了开箱即用的解决方案。当 Redis Cluster 的处理能力达到瓶颈无法满足系统要求的时候，直接动态添加 Redis 节点到集群中即可。根据官方文档中的介绍，Redis Cluster 支持扩展到 1000 个节点。反之，当 Redis Cluster 的处理能力远远满足系统要求，同样可以动态删除集群中 Redis 节点，节省资源。
+
+可以说，Redis Cluster 的动态扩容和缩容是其最大的优势。
+
+虽说 Redis Cluster 可以扩展到 1000 个节点，但强烈不推荐这样做，应尽量避免集群中的节点过多。这是因为 Redis Cluster 中的各个节点基于 Gossip 协议 来进行通信共享信息，当节点过多时，Gossip 协议的效率会显著下降，通信成本剧增。
+
+最后，总结一下 Redis Cluster 的主要优势：
+
+
+
+- 可以横向扩展缓解写压力和存储压力，支持动态扩容和缩容；
+- 具备主从复制、故障转移（内置了 Sentinel 机制，无需单独部署 Sentinel 集群）等开箱即用的功能。
+
+### 一个最基本的Redis Cluster架构是怎样的？
+
+为了保证高可用，Redis Cluster 至少需要 3 个 master 以及 3 个 slave，也就是说每个 master 必须有 1 个 slave。master 和 slave 之间做主从复制，slave 会实时同步 master 上的数据。
+
+不同于普通的 Redis 主从架构，这里的 slave 不对外提供读服务，主要用来保障 master 的高可用，当 master 出现故障的时候替代它。
+
+
+
+如果 master 只有一个 slave 的话，master 宕机之后就直接使用这个 slave 替代 master 继续提供服务。假设 master1 出现故障，slave1 会直接替代 master1，保证 Redis Cluster 的高可用。
+
+如果 master 有多个 slave 的话，Redis Cluster 中的其他节点会从这个 master 的所有 slave 中选出一个替代 master 继续提供服务。Redis Cluster 总是希望数据最完整的 slave 被提升为新的 master。
+
+Redis Cluster 是去中心化的（各个节点基于 Gossip 进行通信），任何一个 master 出现故障，其它的 master 节点不受影响，因为 key 找的是哈希槽而不是 Redis 节点。不过，Redis Cluster 至少要保证宕机的 master 有一个 slave 可用。
+
+如果宕机的 master 无 slave 的话，为了保障集群的完整性，保证所有的哈希槽都指派给了可用的 master ，整个集群将不可用。这种情况下，还是想让集群保持可用的话，可以将cluster-require-full-coverage 这个参数设置成 no，cluster-require-full-coverage 表示需要 16384 个 slot 都正常被分配的时候 Redis Cluster 才可以对外提供服务。
+
+如果我们想要添加新的节点比如 master4、master5 进入 Redis Cluster 也非常方便，只需要重新分配哈希槽即可。
+
+
+
+如果我们想要移除某个 master 节点的话，需要先将该节点的哈希槽移动到其他节点上，这样才可以进行删除，不然会报错。
+
+### Redis Cluster是如何分片的
+
+类似的问题：
+
+●Redis Cluster 中的数据是如何分布的？
+●如何确定给定 key 的应该分布到哪个哈希槽中？
+
+Redis Cluster 并没有使用一致性哈希，采用的是 哈希槽分区 ，每一个键值对都属于一个 hash slot（哈希槽） 。
+
+Redis Cluster 通常有 16384 个哈希槽 ，要计算给定 key 应该分布到哪个哈希槽中，我们只需要先对每个 key 计算 CRC-16（XMODEM） 校验码，然后再对这个校验码对 16384(哈希槽的总数) 取模，得到的值即是 key 对应的哈希槽。
+
+哈希槽的计算公式如下：
+
+
+
+
+
+创建并初始化 Redis Cluster 的时候，Redis 会自动平均分配这 16384 个哈希槽到各个节点，不需要我们手动分配。如果你想自己手动调整的话，Redis Cluster 也内置了相关的命令比如 ADDSLOTS、ADDSLOTSRANGE（后面会详细介绍到重新分配哈希槽相关的命令）。
+
+假设集群有 3 个 Redis 节点组成，每个节点负责整个集群的一部分数据，哈希槽可能是这样分配的（这里只是演示，实际效果可能会有差异）：
+
+●Node 1 ： 0 - 5500 的 hash slots
+●Node 2 ： 5501 - 11000 的 hash slots
+●Node 3 ： 11001 - 16383 的 hash slots
+
+在任意一个 master 节点上执行 CLUSTER SLOTS命令即可返回哈希槽和节点的映射关系:
+
+
+
+客户端连接 Redis Cluster 中任意一个 master 节点即可访问 Redis Cluster 的数据，当客户端发送命令请求的时候，需要先根据 key 通过上面的计算公示找到的对应的哈希槽，然后再查询哈希槽和节点的映射关系，即可找到目标节点。
+
+
+
+如果哈希槽确实是当前节点负责，那就直接响应客户端的请求返回结果，如果不由当前节点负责，就会返回 -MOVED 重定向错误，告知客户端当前哈希槽是由哪个节点负责，客户端向目标节点发送请求并更新缓存的哈希槽分配信息。
+
+
+
+这个时候你可能就会疑问：为什么还会存在找错节点的情况呢？根据公式计算难道还会出错？
+
+
+
+这是因为 Redis Cluster 内部可能会重新分配哈希槽比如扩容缩容的时候（后文中有详细介绍到 Redis Cluster 的扩容和缩容问题），这就可能会导致客户端缓存的哈希槽分配信息会有误。
+
+
+
+从上面的介绍中，我们可以简单总结出 Redis Cluster 哈希槽分区机制的优点：解耦了数据和节点之间的关系，提升了集群的横向扩展性和容错性。
+
+
+
+### 为什么Redis Cluster的哈希槽是16384个
+
+CRC16 算法产生的校验码有 16 位，理论上可以产生 65536（2^16，0 ~ 65535）个值。为什么 Redis Cluster 的哈希槽偏偏选择的是 16384（2^14）个呢？
+
+2015 年的时候，在 Redis 项目的 issues 区，已经有人提了类似的问题，地址：https://github.com/redis/redis/issues/2576。Redis 作者 antirez 巨佬本人专门对这个问题进行了回复。
+
+
+
+antirez 认为哈希槽是 16384（2 的 14 次方） 个的原因是：
+
+●正常的心跳包会携带一个节点的完整配置，它会以幂等的方式更新旧的配置，这意味着心跳包会附带当前节点的负责的哈希槽的信息。假设哈希槽采用 16384 ,则占空间 2k(16384/8)。假设哈希槽采用 65536， 则占空间 8k(65536/8)，这是令人难以接受的内存占用。
+●由于其他设计上的权衡，Redis Cluster 不太可能扩展到超过 1000 个主节点。
+
+也就是说，65536 个固然可以确保每个主节点有足够的哈希槽，但其占用的空间太大。而且，Redis Cluster 的主节点通常不会扩展太多，16384 个哈希槽完全足够用了。
+
+cluster.h 文件中定义了消息结构 clusterMsg（源码地址：https://github.com/redis/redis/blob/7.0/src/cluster.h） ：
+
+
+
+myslots 字段用于存储哈希槽信息， 属于无符号类型的 char 数组，数组长度为 16384/8 = 2048。C 语言中的 char 只占用一个字节，而 Java 语言中 char 占用两个字节，小伙伴们不要搞混了。
+
+这里实际就是通过 bitmap 这种数据结构维护的哈希槽信息，每一个 bit 代表一个哈希槽，每个 bit 只能存储 0/1 。如果该位为 1，表示这个哈希槽是属于这个节点。
+
+
+
+消息传输过程中，会对 myslots 进行压缩，bitmap 的填充率越低，压缩率越高。bitmap 的填充率的值是 哈希槽总数/节点数 ，如果哈希槽总数太大的话，bitmap 的填充率的值也会比较大。
+
+最后，总结一下 Redis Cluster 的哈希槽的数量选择 16384 而不是 65536 的主要原因：
+
+●哈希槽太大会导致心跳包太大，消耗太多带宽；
+●哈希槽总数越少，对存储哈希槽信息的 bitmap 压缩效果越好；
+●Redis Cluster 的主节点通常不会扩展太多，16384 个哈希槽已经足够用了。
+
+### Redis Cluster如何重新分配哈希槽
+
+如果你想自己手动调整的话，Redis Cluster 也内置了相关的命令：
+
+●CLUSTER ADDSLOTS slot [slot ...] : 把一组 hash slots 分配给接收命令的节点，时间复杂度为 O(N)，其中 N 是 hash slot 的总数；
+●CLUSTER ADDSLOTSRANGE start-slot end-slot [start-slot end-slot ...] （Redis 7.0 后新加的命令）： 把指定范围的 hash slots 分配给接收命令的节点，类似于 ADDSLOTS 命令，时间复杂度为 O(N) 其中 N 是起始 hash slot 和结束 hash slot 之间的 hash slot 的总数。
+●CLUSTER DELSLOTS slot [slot ...] : 从接收命令的节点中删除一组 hash slots；
+●CLUSTER FLUSHSLOTS ：移除接受命令的节点中的所有 hash slot；
+●CLUSTER SETSLOT slot MIGRATING node-id： 迁移接受命令的节点的指定 hash slot 到目标节点（node_id 指定）中；
+●CLUSTER SETSLOT slot IMPORTING node-id： 将目标节点（node_id 指定）中的指定 hash slot 迁移到接受命令的节点中；
+●......
+
+简单演示一下:
+
+
+
+### Redis Cluster扩容缩容期间可以提供服务吗
+
+类似的问题：
+
+●如果客户端访问的 key 所属的槽正在迁移怎么办？
+●如何确定给定 key 的应该分布到哪个哈希槽中？
+
+
+
+Redis Cluster 扩容和缩容本质是进行重新分片，动态迁移哈希槽。
+
+
+
+为了保证 Redis Cluster 在扩容和缩容期间依然能够对外正常提供服务，Redis Cluster 提供了重定向机制，两种不同的类型：
+
+
+
+●ASK 重定向 ：可以看做是临时重定向，后续查询仍然发送到旧节点。
+
+●MOVED 重定向 ：可以看做是永久重定向，后续查询发送到新节点。
+
+
+
+客户端向指定节点发送请求命令，从客户端的角度来看，ASK 重定向是下面这样的：
+
+
+
+1如果请求的 key 对应的哈希槽还在当前节点的话，就直接响应客户端的请求。
+
+2如果请求的 key 对应的哈希槽在迁移过程中，但是请求的 key 还未迁移走的话，说明当前节点任然可以处理当前请求，同样可以直接响应客户端的请求。
+
+3如果客户端请求的 key 对应的哈希槽当前正在迁移至新的节点且请求的 key  已经被迁移走的话，就会返回 -ASK 重定向错误，告知客户端要将请求发送到哈希槽被迁移到的目标节点。 -ASK 重定向错误信息中包含请求 key 迁移到的新节点的信息。
+
+4客户端收到 -ASK 重定向错误后，将会临时（一次性）重定向，自动向新节点发送一条 [ASKING](https://redis.io/commands/asking/) 命令。也就是说，接收到 ASKING 命令的节点会强制执行一次请求，下次再来需要重新提前发送 ASKING 命令。
+
+5新节点在收到 ASKING 命令后可能会返回重试错误（TRYAGAIN），因为可能存在当前请求的 key 还在导入中但未导入完成的情况。
+
+6客户端发送真正需要请求的命令。
+
+7ASK 重定向并不会同步更新客户端缓存的哈希槽分配信息，也就是说，客户端对正在迁移的相同哈希槽的请求依然会发送到旧节点而不是新节点。
+
+
+
+如果客户端请求的 key 对应的哈希槽已经迁移完成的话，就会返回 -MOVED 重定向错误，告知客户端当前哈希槽是由哪个节点负责，客户端向新节点发送请求并更新缓存的哈希槽分配信息，后续查询将被发送到新节点。
+
+### Redis Cluster中的节点是怎么进行通信的
+
+Redis Cluster 是一个典型的分布式系统，分布式系统中的各个节点需要互相通信。既然要相互通信就要遵循一致的通信协议，Redis Cluster 中的各个节点基于 Gossip 协议 来进行通信共享信息，每个 Redis 节点都维护了一份集群的状态信息。
+
+Redis Cluster 的节点之间会相互发送多种 Gossip 消息：
+
+●MEET ：在 Redis Cluster 中的某个 Redis 节点上执行 CLUSTER MEET ip port 命令，可以向指定的 Redis 节点发送一条 MEET 信息，用于将其添加进 Redis Cluster 成为新的 Redis 节点。
+●PING/PONG ：Redis Cluster 中的节点都会定时地向其他节点发送 PING 消息，来交换各个节点状态信息，检查各个节点状态，包括在线状态、疑似下线状态 PFAIL 和已下线状态 FAIL。
+●FAIL ：Redis Cluster 中的节点 A 发现 B 节点 PFAIL ，并且在下线报告的有效期限内集群中半数以上的节点将 B 节点标记为 PFAIL，节点 A 就会向集群广播一条 FAIL 消息，通知其他节点将故障节点 B 标记为 FAIL 。
+●......
+
+有了 Redis Cluster 之后，不需要专门部署 Sentinel 集群服务了。Redis Cluster 相当于是内置了 Sentinel 机制，Redis Cluster 内部的各个 Redis 节点通过 Gossip 协议互相探测健康状态，在故障时可以自动切换。
+
+cluster.h 文件中定义了所有的消息类型（源码地址：https://github.com/redis/redis/blob/7.0/src/cluster.h） 。Redis 3.0 版本的时候只有 9 种消息类型，到了 7.0 版本的时候已经有 11 种消息类型了。
+
+
 
 ## redis分布式怎么做 知道哨兵吗
 
