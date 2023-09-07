@@ -470,58 +470,359 @@ stream 秒杀异步
 
 ## 项目中用到了redis，介绍一下redis的架构
 
-
-
-# 四、线程模型
-
-## --redis是单线程吗
-
-单线程指的是**「接收客户端请求->解析请求 ->进行数据读写等操作->发送数据给客户端」这个过程是由一个线程（主线程）来完成的**
-
-redis会启动后台线程  
-
-1处理关闭文件
-
-2 AOF刷盘
-
-## --redis单线程还那么快（网络I/O和执行命令
-
-- redis大部分操作都在内存中完成，redis瓶颈并非CPU
-- 避免了**多线程之间的竞争**，省去了多线程切换带来的时间和性能上的开销，而且也不会导致死锁问题。
-- I/O多路复用机制：处理大量的客户端Socket请求；
-  - ，IO 多路复用机制是指一个线程处理多个 IO 流，就是我们经常听到的 select/epoll 机制。简单来说，在 Redis 只运行单线程的情况下，该机制允许内核中，同时存在多个监听 Socket 和已连接 Socket。内核会一直监听这些 Socket 上的连接请求或数据请求。一旦有请求到达，就会交给 Redis 线程处理，这就实现了一个 Redis 线程处理多个 IO 流的效果。
-
-
-
-## --redis6.0后为何引入多线程
-
-6.0后引入多个I/O线程处理网络请求，随着网络硬件性能的提升，Redis的性能有时会出现在网络I/O的处理上
-
-**但是对于命令的执行，Redis 仍然使用单线程来处理**
-
-## Redis如何找出大量以某一个前缀开头的key。(有什么命令，不会)
-
 # 二、数据类型
 
-## Redis常见数据类型及其使用场景（5+4）
+## Redis常见数据类型及其使用场景
 
-### String
+### String（字符串）
 
+#### 介绍
 
+- 最常用的数据结构
+- 二进制安全，可以存储任何类型：字符串、浮点数、图片、序列化后的对象、整数
+- Redis C语言写的，但是没有用C的字符串，底层SDS 简单动态字符串。两者对比见 **底层数据结构（3点）**
 
-### List
-
-
-
-### Hash
-
-
-
-### Set
+#### 常用命令
 
 
 
-### Zset
+| 命令                           | 介绍                             |
+| ------------------------------ | -------------------------------- |
+| SET key value                  | 设置指定 key 的值                |
+| SETNX key value                | 只有在 key 不存在时设置 key 的值 |
+| GET key                        | 获取指定 key 的值                |
+| MSET key1 value1 key2 value2 … | 设置一个或多个指定 key 的值      |
+| MGET key1 key2 ...             | 获取一个或多个指定 key 的值      |
+| STRLEN key                     | 返回 key 所储存的字符串值的长度  |
+| INCR key                       | 将 key 中储存的数字值增一        |
+| DECR key                       | 将 key 中储存的数字值减一        |
+| EXISTS key                     | 判断指定 key 是否存在            |
+| DEL key（通用）                | 删除指定的 key                   |
+| EXPIRE key seconds（通用）     | 给指定 key 设置过期时间          |
+
+更多 Redis String 命令以及详细使用指南，请查看 Redis 官网对应的介绍：[https://redis.io/commands/?group=stringopen in new window](https://redis.io/commands/?group=string) 
+
+**基本操作**：
+
+```bash
+> SET key value
+OK
+> GET key
+"value"
+> EXISTS key
+(integer) 1
+> STRLEN key
+(integer) 5
+> DEL key
+(integer) 1
+> GET key
+(nil)
+```
+
+**批量设置**：
+
+```bash
+> MSET key1 value1 key2 value2
+OK
+> MGET key1 key2 # 批量获取多个 key 对应的 value
+1) "value1"
+2) "value2"
+```
+
+**计数器（字符串的内容为整数的时候可以使用）：**
+
+```bash
+> SET number 1
+OK
+> INCR number # 将 key 中储存的数字值增一
+(integer) 2
+> GET number
+"2"
+> DECR number # 将 key 中储存的数字值减一
+(integer) 1
+> GET number
+"1"
+```
+
+**设置过期时间（默认为永不过期）**：
+
+```bash
+> EXPIRE key 60
+(integer) 1
+> SETEX key 60 value # 设置值并设置过期时间
+OK
+> TTL key
+(integer) 56
+```
+
+#### 应用场景
+
+**需要存储常规数据的场景**
+
+- 举例：缓存 session、token、图片地址、序列化后的对象(相比较于 Hash 存储更节省内存)。
+- 相关命令：`SET`、`GET`。
+
+**需要计数的场景**
+
+- 举例：用户单位时间的请求数（简单限流可以用到）、页面单位时间的访问数。
+- 相关命令：`SET`、`GET`、 `INCR`、`DECR` 。
+
+**分布式锁**
+
+利用 `SETNX key value` 命令可以实现一个最简易的分布式锁（存在一些缺陷，通常不建议这样实现分布式锁）。
+
+### List（列表）
+
+#### 介绍
+
+Redis 中的 List 其实就是链表数据结构的实现。我在 [线性数据结构 :数组、链表、栈、队列open in new window](https://javaguide.cn/cs-basics/data-structure/linear-data-structure.html) 这篇文章中详细介绍了链表这种数据结构，我这里就不多做介绍了。
+
+许多高级编程语言都内置了链表的实现比如 Java 中的 `LinkedList`，但是 C 语言并没有实现链表，所以 Redis 实现了自己的链表数据结构。Redis 的 List 的实现为一个 **双向链表**，即可以支持反向查找和遍历，更方便操作，不过带来了部分额外的内存开销。
+
+#### 常用命令
+
+| 命令                        | 介绍                                       |
+| --------------------------- | ------------------------------------------ |
+| RPUSH key value1 value2 ... | 在指定列表的尾部（右边）添加一个或多个元素 |
+| LPUSH key value1 value2 ... | 在指定列表的头部（左边）添加一个或多个元素 |
+| LSET key index value        | 将指定列表索引 index 位置的值设置为 value  |
+| LPOP key                    | 移除并获取指定列表的第一个元素(最左边)     |
+| RPOP key                    | 移除并获取指定列表的最后一个元素(最右边)   |
+| LLEN key                    | 获取列表元素数量                           |
+| LRANGE key start end        | 获取列表 start 和 end 之间 的元素          |
+
+更多 Redis List 命令以及详细使用指南，请查看 Redis 官网对应的介绍：[https://redis.io/commands/?group=listopen in new window](https://redis.io/commands/?group=list) 。
+
+**通过 `RPUSH/LPOP` 或者 `LPUSH/RPOP`实现队列**：
+
+
+
+```bash
+> RPUSH myList value1
+(integer) 1
+> RPUSH myList value2 value3
+(integer) 3
+> LPOP myList
+"value1"
+> LRANGE myList 0 1
+1) "value2"
+2) "value3"
+> LRANGE myList 0 -1
+1) "value2"
+2) "value3"
+```
+
+**通过 `RPUSH/RPOP`或者`LPUSH/LPOP` 实现栈**：
+
+
+
+```bash
+> RPUSH myList2 value1 value2 value3
+(integer) 3
+> RPOP myList2 # 将 list的最右边的元素取出
+"value3"
+```
+
+我专门画了一个图方便大家理解 `RPUSH` , `LPOP` , `lpush` , `RPOP` 命令：
+
+![img](https://duoduo-img.oss-cn-shenzhen.aliyuncs.com/202309062317628.png)
+
+**通过 `LRANGE` 查看对应下标范围的列表元素**：
+
+
+
+```bash
+> RPUSH myList value1 value2 value3
+(integer) 3
+> LRANGE myList 0 1
+1) "value1"
+2) "value2"
+> LRANGE myList 0 -1
+1) "value1"
+2) "value2"
+3) "value3"
+```
+
+通过 `LRANGE` 命令，你可以基于 List 实现分页查询，性能非常高！
+
+**通过 `LLEN` 查看链表长度**：
+
+```bash
+> LLEN myList
+(integer) 3
+```
+
+
+
+### Hash（哈希）
+
+#### 介绍
+
+- String类型 键值对的映射表，适合存储对象，后续可修改对象某个字段的值
+- 类似1.8前 HashMap，数组+链表
+
+#### 常用命令
+
+| 命令                                      | 介绍                                                     |
+| ----------------------------------------- | -------------------------------------------------------- |
+| HSET key field value                      | 设置指定哈希表中指定字段的值                             |
+| HSETNX key field value                    | 只有指定字段不存在时设置指定字段的值                     |
+| HMSET key field1 value1 field2 value2 ... | 同时将一个或多个 field-value (域-值)对设置到指定哈希表中 |
+| HGET key field                            | 获取指定哈希表中指定字段的值                             |
+| HMGET key field1 field2 ...               | 获取指定哈希表中一个或者多个指定字段的值                 |
+| HGETALL key                               | 获取指定哈希表中所有的键值对                             |
+| HEXISTS key field                         | 查看指定哈希表中指定的字段是否存在                       |
+| HDEL key field1 field2 ...                | 删除一个或多个哈希表字段                                 |
+| HLEN key                                  | 获取指定哈希表中字段的数量                               |
+| HINCRBY key field increment               | 对指定哈希中的指定字段做运算操作（正数为加，负数为减）   |
+
+更多 Redis Hash 命令以及详细使用指南，请查看 Redis 官网对应的介绍：[https://redis.io/commands/?group=hashopen in new window](https://redis.io/commands/?group=hash) 。
+
+
+
+**模拟对象数据存储**：
+
+```bash
+> HMSET userInfoKey name "guide" description "dev" age 24
+OK
+> HEXISTS userInfoKey name # 查看 key 对应的 value中指定的字段是否存在。
+(integer) 1
+> HGET userInfoKey name # 获取存储在哈希表中指定字段的值。
+"guide"
+> HGET userInfoKey age
+"24"
+> HGETALL userInfoKey # 获取在哈希表中指定 key 的所有字段和值
+1) "name"
+2) "guide"
+3) "description"
+4) "dev"
+5) "age"
+6) "24"
+> HSET userInfoKey name "GuideGeGe"
+> HGET userInfoKey name
+"GuideGeGe"
+> HINCRBY userInfoKey age 2
+(integer) 26
+```
+
+
+
+#### 应用场景
+
+**对象数据存储场景**
+
+- 举例：用户信息、商品信息、文章信息、购物车信息。
+- 相关命令：`HSET` （设置单个字段的值）、`HMSET`（设置多个字段的值）、`HGET`（获取单个字段的值）、`HMGET`（获取多个字段的值
+
+### Set（集合）
+
+#### 介绍
+
+- 无序集合，元素没有先后顺序但唯一，类似HashSet
+- 区别List：判是否在集合，且不会重复元素
+- 交集、差集、并集
+- 可以实现，用户关注人和粉丝存在两个集合中
+
+#### 常用命令
+
+| 命令                                  | 介绍                                      |
+| ------------------------------------- | ----------------------------------------- |
+| SADD key member1 member2 ...          | 向指定集合添加一个或多个元素              |
+| SMEMBERS key                          | 获取指定集合中的所有元素                  |
+| SCARD key                             | 获取指定集合的元素数量                    |
+| SISMEMBER key member                  | 判断指定元素是否在指定集合中              |
+| SINTER key1 key2 ...                  | 获取给定所有集合的交集                    |
+| SINTERSTORE destination key1 key2 ... | 将给定所有集合的交集存储在 destination 中 |
+| SUNION key1 key2 ...                  | 获取给定所有集合的并集                    |
+| SUNIONSTORE destination key1 key2 ... | 将给定所有集合的并集存储在 destination 中 |
+| SDIFF key1 key2 ...                   | 获取给定所有集合的差集                    |
+| SDIFFSTORE destination key1 key2 ...  | 将给定所有集合的差集存储在 destination 中 |
+| SPOP key count                        | 随机移除并获取指定集合中一个或多个元素    |
+| SRANDMEMBER key count                 | 随机获取指定集合中指定数量的元素          |
+
+更多 Redis Set 命令以及详细使用指南，请查看 Redis 官网对应的介绍：[https://redis.io/commands/?group=setopen in new window](https://redis.io/commands/?group=set) 。
+
+**基本操作**：
+
+```bash
+> SADD mySet value1 value2
+(integer) 2
+> SADD mySet value1 # 不允许有重复元素，因此添加失败
+(integer) 0
+> SMEMBERS mySet
+1) "value1"
+2) "value2"
+> SCARD mySet
+(integer) 2
+> SISMEMBER mySet value1
+(integer) 1
+> SADD mySet2 value2 value3
+(integer) 2
+```
+
+- `mySet` : `value1`、`value2` 。
+- `mySet2`：`value2`、`value3` 。
+
+**求交集**：
+
+```bash
+> SINTERSTORE mySet3 mySet mySet2
+(integer) 1
+> SMEMBERS mySet3
+1) "value2"
+```
+
+**求并集**：
+
+```bash
+> SUNION mySet mySet2
+1) "value3"
+2) "value2"
+3) "value1"
+```
+
+**求差集**：
+
+```bash
+> SDIFF mySet mySet2 # 差集是由所有属于 mySet 但不属于 A 的元素组成的集合
+1) "value1"
+```
+
+#### 应用场景
+
+**需要存放的数据不能重复的场景**
+
+- 举例：网站 UV 统计（数据量巨大的场景还是 `HyperLogLog`更适合一些）、文章点赞、动态点赞等场景。
+- 相关命令：`SCARD`（获取集合数量） 。
+
+![img](https://duoduo-img.oss-cn-shenzhen.aliyuncs.com/202309062323550.png)
+
+**需要获取多个数据源交集、并集和差集的场景**
+
+- 举例：共同好友(交集)、共同粉丝(交集)、共同关注(交集)、好友推荐（差集）、音乐推荐（差集）、订阅号推荐（差集+交集） 等场景。
+- 相关命令：`SINTER`（交集）、`SINTERSTORE` （交集）、`SUNION` （并集）、`SUNIONSTORE`（并集）、`SDIFF`（差集）、`SDIFFSTORE` （差集）。
+
+![img](https://duoduo-img.oss-cn-shenzhen.aliyuncs.com/202309062323547.png)
+
+**需要随机获取数据源中的元素的场景**
+
+- 举例：抽奖系统、随机点名等场景。
+- 相关命令：`SPOP`（随机获取集合中的元素并移除，适合不允许重复中奖的场景）、`SRANDMEMBER`（随机获取集合中的元素，适合允许重复中奖的场景）。
+
+### Zset（有序集合）
+
+#### 介绍
+
+- 类似set 多score参数，类似HashMap+TreeSet
+- 可以按score排序，按score范围获取元素
+
+
+
+
+
+
+
+
 
 list set zset string hash
 
@@ -538,6 +839,12 @@ list set zset string hash
 - GEO（3.2 版新增）：存储地理位置信息的场景，比如滴滴叫车；
 - Stream（5.0 版新增）：消息队列，相比于基于 List 类型实现的消息队列，有这两个特有的特性：自动生成全局唯一消息ID，支持以消费组形式消费数据。
 
+## Redis 4种特殊数据结构 及 使用场景
+
+
+
+
+
 ## redis数据结构的底层原理
 
 ![img](https://duoduo-img.oss-cn-shenzhen.aliyuncs.com/202309051701384.png)
@@ -545,6 +852,8 @@ list set zset string hash
 ### SDS
 
 ### C语言字符串的缺陷
+
+相比于 C 的原生字符串，Redis 的 SDS 不光可以保存文本数据还可以保存二进制数据，并且获取字符串长度复杂度为 O(1)（C 字符串为 O(N)）,除此之外，Redis 的 SDS API 是安全的，不会造成缓冲区溢出。
 
 
 
@@ -607,9 +916,7 @@ set 哈希表或者整数集合
 
 zset listpack或者跳表
 
-## redis底层数据结构
 
-## 不同数据结构应用场景
 
 ## Redis中的zset，如何实现一个排行榜的功能。
 
@@ -640,28 +947,6 @@ token，前端访问会带有token
 
 
 ## 4、存储数据的`Redis`挂掉了怎么办？
-
-
-
-# 六、Redis事务
-
-## --概念
-
-单个redis命令执行是原子性，redis事务不是原子性，理解为打包的批量执行的脚本，中间失败的指令不会引起回滚，也不影响后续指令执行
-
-- 具有隔离性，不会被其他命令请求打断
-
-## Redis事务过程原理？(开启事务，版本号机制实现)
-
-四个命令  multi  exec  discard  watch
-
-1. 开始事务（`MULTI`）；
-2. 命令入队(批量操作 Redis 的命令，先进先出（FIFO）的顺序执行)；
-3. 执行事务(`EXEC`)。
-
-discard清空事务队列
-
-watch监控  如果命令被修改  就执行失败
 
 # 三、持久化
 
@@ -711,6 +996,8 @@ redis默认持久化是RDB，重启加载之前的快照
 概念 ：以日志形式记录每个写操作，记录写命令，只许追加不可改写文件，redis启动之初会读取该文件重新构建数据（根据写指令从前往后执行恢复数据
 
 >  用 AOF 日志的方式来恢复数据其实是很慢的，因为 Redis 执行命令由单线程负责的，而 AOF 日志恢复数据的方式是顺序执行日志里的每一条命令，如果 AOF 日志很大，这个「重放」的过程就会很慢了。
+
+![AOF 工作基本流程](https://duoduo-img.oss-cn-shenzhen.aliyuncs.com/202309062352193.png)
 
 特点
 
@@ -764,6 +1051,10 @@ aof数据安全性较好，每次写操作都生成
 
 
 
+## RDB AOF对比
+
+
+
 ## 如何选择某一种持久化方式
 
 数据安全性要求高选择AOF
@@ -775,6 +1066,63 @@ aof数据安全性较好，每次写操作都生成
 对AOF文件瘦身  对一个属性的多次修改只用保存最后一次的写命令
 
 
+
+
+
+# 四、线程模型
+
+## --redis是单线程吗
+
+单线程指的是**「接收客户端请求->解析请求 ->进行数据读写等操作->发送数据给客户端」这个过程是由一个线程（主线程）来完成的**
+
+redis会启动后台线程  
+
+1处理关闭文件
+
+2 AOF刷盘
+
+## --redis单线程还那么快（网络I/O和执行命令
+
+- redis大部分操作都在内存中完成，redis瓶颈并非CPU
+- 避免了**多线程之间的竞争**，省去了多线程切换带来的时间和性能上的开销，而且也不会导致死锁问题。
+- I/O多路复用机制：处理大量的客户端Socket请求；
+  - ，IO 多路复用机制是指一个线程处理多个 IO 流，就是我们经常听到的 select/epoll 机制。简单来说，在 Redis 只运行单线程的情况下，该机制允许内核中，同时存在多个监听 Socket 和已连接 Socket。内核会一直监听这些 Socket 上的连接请求或数据请求。一旦有请求到达，就会交给 Redis 线程处理，这就实现了一个 Redis 线程处理多个 IO 流的效果。
+
+
+
+## --redis6.0后为何引入多线程
+
+6.0后引入多个I/O线程处理网络请求，随着网络硬件性能的提升，Redis的性能有时会出现在网络I/O的处理上
+
+**但是对于命令的执行，Redis 仍然使用单线程来处理**
+
+## Redis如何找出大量以某一个前缀开头的key。(有什么命令，不会)
+
+# 五、Redis应用
+
+
+
+
+
+# 六、Redis事务
+
+## --概念
+
+单个redis命令执行是原子性，redis事务不是原子性，理解为打包的批量执行的脚本，中间失败的指令不会引起回滚，也不影响后续指令执行
+
+- 具有隔离性，不会被其他命令请求打断
+
+## Redis事务过程原理？(开启事务，版本号机制实现)
+
+四个命令  multi  exec  discard  watch
+
+1. 开始事务（`MULTI`）；
+2. 命令入队(批量操作 Redis 的命令，先进先出（FIFO）的顺序执行)；
+3. 执行事务(`EXEC`)。
+
+discard清空事务队列
+
+watch监控  如果命令被修改  就执行失败
 
 # 功能篇
 
@@ -878,32 +1226,32 @@ redis如何实现定期删除
       2. allkeys-lru 最久未使用
       3. allkeys-lfu 最少使用
 
-## 缓存更新策略=缓存读写策略
+## 缓存更新策略=缓存读写策略=同步策略
 
 该策略解决的是 修改数据库的同时如何修改缓存
 
+三种策略各有优劣
+
 ![image-20230724165110286](https://duoduo-img.oss-cn-shenzhen.aliyuncs.com/202307241651359.png)
-
-**cache aside pattern旁路缓存模式**
-
-适合读请求比较多的场景
-
-Cache Aside Pattern 中服务端需要同时维系 db 和 cache，并且是以 db 的结果为准。
 
 ### Cache Aside Pattern(旁路缓存模式)
 
-**Cache Aside Pattern 是我们平时使用比较多的一个缓存读写模式，比较适合读请求比较多的场景。**
+概述
 
-Cache Aside Pattern 中服务端需要同时维系 db 和 cache，并且是以 db 的结果为准。
+由缓存的调用者，在更新数据库的同时更新缓存
 
-
+- 较常用，适合读请求多场景
+- 服务端需要同时维系 db 和 cache，并且是以 db 的结果为准。
 
 #### **缓存读写步骤**
 
 **写**：
 
 - 先更新 db
+
 - 然后直接删除 cache 。
+
+  ![img](https://duoduo-img.oss-cn-shenzhen.aliyuncs.com/202309062356252.png)
 
 **读** :
 
@@ -911,29 +1259,23 @@ Cache Aside Pattern 中服务端需要同时维系 db 和 cache，并且是以 d
 - cache 中读取不到的话，就从 db 中读取数据返回
 - 再把数据放到 cache 中。
 
+![img](https://duoduo-img.oss-cn-shenzhen.aliyuncs.com/202309062356518.png)
 
+#### 问题：先后顺序
 
-比如说面试官很可能会追问：“**在写数据的过程中，可以先删除 cache ，后更新 db 么？**”
+“**在写数据的过程中，可以先删除 cache ，后更新 db 么？**”
 
-**答案：** 那肯定是不行的！因为这样可能会造成 **数据库（db）和缓存（Cache）数据不一致**的问题。
-
-举例：请求 1 先写数据 A，请求 2 随后读数据 A 的话，就很有可能产生数据不一致性的问题。
-
-这个过程可以简单描述为：
+**答案：** 不行，会造成 **数据库（db）和缓存（Cache）数据不一致**的问题。 具体看双写一致性问题。
 
 > 请求 1 先把 cache 中的 A 数据删除 -> 请求 2 从 db 中读取数据->请求 1 再把 db 中的 A 数据更新
 
-当你这样回答之后，面试官可能会紧接着就追问：“**在写数据的过程中，先更新 db，后删除 cache 就没有问题了么？**”
+“**在写数据的过程中，先更新 db，后删除 cache 就没有问题了么？**”
 
 **答案：** 理论上来说还是可能会出现数据不一致性的问题，不过概率非常小，因为缓存的写入速度是比数据库的写入速度快很多。
 
-举例：请求 1 先读数据 A，请求 2 随后写数据 A，并且数据 A 在请求 1 请求之前不在缓存中的话，也有可能产生数据不一致性的问题。
+> 请求 1 从 db 读数据 A-> 请求 2 更新 db 中的数据 A（此时缓存中无数据 A ，故不用执行删除缓存操作 ） -> 请求 1 将数据 A 写入 cache；此时旧数据写入缓存，数据不一致
 
-这个过程可以简单描述为：
-
-> 请求 1 从 db 读数据 A-> 请求 2 更新 db 中的数据 A（此时缓存中无数据 A ，故不用执行删除缓存操作 ） -> 请求 1 将数据 A 写入 cache
-
-**Cache Aside Pattern 的缺陷**
+#### **缺点**
 
 **缺陷 1：首次请求数据一定不在 cache 的问题**
 
@@ -949,45 +1291,46 @@ Cache Aside Pattern 中服务端需要同时维系 db 和 cache，并且是以 d
 
 ### Read/Write Through Pattern(读写穿透)
 
-Read/Write Through Pattern 中服务端把 cache 视为主要数据存储，从中读取数据并将数据写入其中。cache 服务负责将此数据读取和写入 db，从而减轻了应用程序的职责。
+概述
 
-这种缓存读写策略小伙伴们应该也发现了在平时在开发过程中非常少见。抛去性能方面的影响，大概率是因为我们经常使用的分布式缓存 Redis 并没有提供 cache 将数据写入 db 的功能。
+缓存与数据库整合为一个服务由服务来维护一致性。调用者调用该服务，无需关心缓存一致性问题。
+
+- 服务端把 cache 视为主要数据存储，从中读取数据并将数据写入其中。
+- cache 服务负责将此数据读取和写入 db，从而减轻了应用程序的职责。
+- 非常少见。抛去性能方面的影响，大概率是因为我们经常使用的分布式缓存 Redis 并**没有提供 cache 将数据写入 db** 的功能。
+
+#### 读写步骤
 
 **写（Write Through）：**
 
 - 先查 cache，cache 中不存在，直接更新 db。
 - cache 中存在，则先更新 cache，然后 cache 服务自己更新 db（**同步更新 cache 和 db**）。
 
-简单画了一张图帮助大家理解写的步骤。
-
-
+![img](https://duoduo-img.oss-cn-shenzhen.aliyuncs.com/202309070000927.png)
 
 **读(Read Through)：**
 
 - 从 cache 中读取数据，读取到就直接返回 。
 - 读取不到的话，先从 db 加载，写入到 cache 后返回响应。
 
-简单画了一张图帮助大家理解读的步骤。
+![img](https://duoduo-img.oss-cn-shenzhen.aliyuncs.com/202309070000957.png)
 
 Read-Through Pattern 实际只是在 Cache-Aside Pattern 之上进行了封装。在 Cache-Aside Pattern 下，发生读请求的时候，如果 cache 中不存在对应的数据，是由客户端自己负责把数据写入 cache，而 Read Through Pattern 则是 cache 服务自己来写入缓存的，这对客户端是透明的。
 
 和 Cache Aside Pattern 一样， Read-Through Pattern 也有首次请求数据一定不再 cache 的问题，对于热点数据可以提前放入缓存中
 
-
-
 ### Write Behind Pattern(异步缓存写入)
 
-Write Behind Pattern 和 Read/Write Through Pattern 很相似，两者都是由 cache 服务来负责 cache 和 db 的读写。
+概述
 
-但是，两个又有很大的不同：**Read/Write Through 是同步更新 cache 和 db，而 Write Behind 则是只更新缓存，不直接更新 db，而是改为异步批量的方式来更新 db。**
+调用者只操作缓存，由其它线程异步的将缓存数据持久化到数据
+库，保证最终一致。
 
-很明显，这种方式对数据一致性带来了更大的挑战，比如 cache 数据可能还没异步更新 db 的话，cache 服务可能就就挂掉了。
-
-这种策略在我们平时开发过程中也非常非常少见，但是不代表它的应用场景少，比如消息队列中消息的异步写入磁盘、MySQL 的 Innodb Buffer Pool 机制都用到了这种策略。
+- 和 Read/Write Through Pattern 很相似，两者都是由 cache 服务来负责 cache 和 db 的读写。
+- 但是**Read/Write Through 是同步更新 cache 和 db，而 Write Behind 则是只更新缓存，不直接更新 db，而是改为异步批量的方式来更新 db。**（这种方式对数据一致性带来了更大的挑战，比如 cache 数据可能还没异步更新 db 的话，cache 服务可能就就挂掉了。）
+- 非常少见，但是不代表它的应用场景少，比如消息队列中消息的异步写入磁盘、MySQL 的 Innodb Buffer Pool 机制都用到了这种策略。
 
 Write Behind Pattern 下 db 的写性能非常高，非常适合一些数据经常变化又对数据一致性要求没那么高的场景，比如浏览量、点赞量。
-
-
 
 ## mysql和redis双写一致性（四种方案
 
@@ -1064,10 +1407,6 @@ Write Behind Pattern 下 db 的写性能非常高，非常适合一些数据经�
 > 请求 1 从 db 读数据 A-> 请求 2 更新 db 中的数据 A（此时缓存中无数据 A ，故不用执行删除缓存操作 ） -> 请求 1 将数据 A 写入 cache
 
 
-
-## Redis的同步策略有什么（更新策略
-
-三种
 
 ## 缓存穿透 及解决方案
 
@@ -1180,7 +1519,7 @@ MQ本质是业务的排队。好处是避免高并发压垮系统的关键组件
 
 3.一致性问题：A处理成功直接返回  接受消息的BCD  有一个写库失败 就不一致
 
-# 八、主从 哨兵 集群
+# 八、高可用篇（主从 哨兵 集群）
 
 ## Redis 主从复制（主从节点之间如何同步数据）
 
