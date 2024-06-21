@@ -1,6 +1,6 @@
 # 日常实习-Redis面试题
 
-小林coding:面试题
+小林coding:面试题 11111
 
 [3 万字 + 40 张图 ｜ Redis 常见面试题（2023 版本） (qq.com)](https://mp.weixin.qq.com/s?__biz=MzUxODAzNDg4NQ==&mid=2247527565&idx=2&sn=f052a879d5c6c6c6cb69f4de668e71bd&chksm=f98d2827cefaa13182a5d8075187674e805368fab508bea2b7d5429aec1af2092df3e59571db&scene=178&cur_album_id=1790401816640225283#rd)
 
